@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Weather Logger</string>
+
+    <!--menu_main-->
+    <string name="menuTitle_save">Save weather data</string>
+
+    <!--single_layout_main-->
+    <string name="text_temperature">Temperature:</string>
+    <string name="text_data">Date:</string>
+</resources>
