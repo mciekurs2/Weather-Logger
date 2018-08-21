@@ -5,10 +5,8 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import kotlinx.android.synthetic.main.single_layout_main.view.*
-import java.time.LocalDateTime
-import java.util.*
 
-class RecyclerViewAdapter (private val list: MutableList<String>): RecyclerView.Adapter<CustomViewHolder>() {
+class RecyclerViewAdapter (private val list: MutableList<WeatherInfo>): RecyclerView.Adapter<CustomViewHolder>() {
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CustomViewHolder {
         val itemView = LayoutInflater.from(parent.context)
                 .inflate(R.layout.single_layout_main, parent, false)
@@ -16,7 +14,9 @@ class RecyclerViewAdapter (private val list: MutableList<String>): RecyclerView.
     }
 
     override fun onBindViewHolder(holder: CustomViewHolder, position: Int) {
-        holder.view.textView_date.text = list[position]
+        //Need to do force reload to layout after changing format argument in strings.xml file
+        holder.view.textView_date.text = holder.view.context.getString(R.string.text_data, list[position].data)
+        holder.view.textView_temperature.text = holder.view.context.getString(R.string.text_temperature, list[position].temp)
     }
 
     override fun getItemCount() = list.size
