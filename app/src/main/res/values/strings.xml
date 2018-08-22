@@ -1,6 +1,9 @@
 <resources>
     <string name="app_name">Weather Logger</string>
 
+    <!--main_activity-->
+    <string name="weather_url">http://api.openweathermap.org/data/2.5/weather?lat=%1$s&amp;lon=%2$s&amp;units=metric&amp;appid=65b9e5e5bf3289000b4d663073142565</string>
+
     <!--menu_main-->
     <string name="menuTitle_save">Save weather data</string>
     <string name="menuTitle_settings">Manage application settings</string>
@@ -8,5 +11,10 @@
     <!--single_layout_main-->
     <string name="text_temperature">Temperature: %1$s</string>
     <string name="text_data">Date: %1$s</string>
+
+    <!--snackbar-->
+    <string name="location_not_enabled">Location has not been enabled on your device. Click on setting button to change it!</string>
+    <string name="location_service_not_granted">Location permission has been denied.</string>
+    <string name="location_service_granted">Location permission has been granted.</string>
 
 </resources>

@@ -3,37 +3,37 @@ package lv.mciekurs.weatherlogger
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.Dialog
 import android.content.Context
-import android.graphics.Color
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
+import android.content.Intent
 import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.support.v7.app.AppCompatActivity
 import android.os.Bundle
+import android.provider.Settings
 import android.support.design.widget.Snackbar
-import android.support.v4.content.ContextCompat
 import android.support.v7.widget.LinearLayoutManager
 import android.view.Menu
 import android.view.MenuItem
 import android.widget.Toast
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationServices
+import com.google.gson.GsonBuilder
 import kotlinx.android.synthetic.main.activity_main.*
 import java.util.*
 import com.nabinbhandari.android.permissions.PermissionHandler
 import com.nabinbhandari.android.permissions.Permissions;
+import okhttp3.*
+import java.io.IOException
 
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
-    private lateinit var locationRequest: LocationRequest
-    private var ACCESS_COARSE_LOCATION_CODE = 123
-    private lateinit var dialog: Dialog
     private lateinit var list: MutableList<WeatherInfo>
     private lateinit var adapter: RecyclerViewAdapter
+    private var lat = 0.0
+    private var lon = 0.0
+    private val permissions = arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.INTERNET)
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,74 +49,137 @@ class MainActivity : AppCompatActivity() {
 
     }
 
-    private fun getLocation(){
-        locationRequest = LocationRequest.create()
-        locationRequest.priority = LocationRequest.PRIORITY_HIGH_ACCURACY
-        locationRequest.interval = 100
-        locationRequest.fastestInterval = 100
 
+    private val locationListener = object : LocationListener {
+        override fun onStatusChanged(p0: String?, p1: Int, p2: Bundle?) {}
 
+        override fun onProviderEnabled(p0: String?) {}
+
+        override fun onProviderDisabled(p0: String?) {}
+
+        override fun onLocationChanged(location: Location) {
+            //TODO: Get lan and lon
+            lat = location.latitude
+            lon = location.longitude
+        }
 
     }
 
     @SuppressLint("MissingPermission")
     private fun getJsonData(){
-        var lat = 0.0
-        var lon = 0.0
+        val mLocationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        val location = mLocationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+        mLocationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1,
+                1.0f, locationListener)
 
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
-            if (location != null) {
-                lat = location.latitude
-                lon = location.longitude
+        //TODO: Location must not be null, location disabled
+        lat = location.latitude
+        lon = location.longitude
 
-                Toast.makeText(applicationContext, "$lat, $lon", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(applicationContext, "Unsuccessful conn", Toast.LENGTH_SHORT).show()
+        val url = this.getString(R.string.weather_url, lat, lon)
+        //Toast.makeText(this, url, Toast.LENGTH_SHORT).show()
+
+        val request = Request.Builder().url(url).build()
+        val client =  OkHttpClient()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onResponse(call: Call, response: Response) {
+                val body = response.body().toString()
+                val gson = GsonBuilder().create()
+                val weatherData = gson.fromJson(body, CurrentWeatherData::class.java)
+                runOnUiThread {
+                    val temp = weatherData.main.temp
+                    val date = Calendar.getInstance().time.toString()
+                    list.add(WeatherInfo(temp, date))
+                    adapter.notifyDataSetChanged()
+                }
             }
-        }
 
-
-
-/*            if (it.isSuccessful){
-                lat = it.result.latitude
-                lon = it.result.longitude
-
-                Toast.makeText(applicationContext, "$lat, $lon", Toast.LENGTH_SHORT).show()
+            override fun onFailure(call: Call, e: IOException) {
+                //TODO: Need to handle event son failure
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "Coordinates: $lat / $lon", Toast.LENGTH_SHORT).show()
+                    print("Coordinates: $lat / $lon")
+                }
             }
-            else {
-                Toast.makeText(applicationContext, "Unsuccessful conn", Toast.LENGTH_SHORT).show()
-            }*/
+
+        })
 
 
-        val url = "http://api.openweathermap.org/data/2.5/weather?lat=$lat&lon=$lon&units=metric&appid=65b9e5e5bf3289000b4d663073142565"
     }
 
+    @SuppressLint("MissingPermission")
     override fun onStart() {
         super.onStart()
-        Permissions.check(this, Manifest.permission.ACCESS_COARSE_LOCATION, null, object : PermissionHandler() {
-            override fun onGranted() {}
+        Permissions.check(this, permissions, null, null, object : PermissionHandler() {
+            override fun onGranted() {
+                checkServices()
+            }
+
+            override fun onDenied(context: Context?, deniedPermissions: ArrayList<String>?) {
+                //TODO: Disable button if editText is empty
+                checkServices()
+            }
         })
     }
 
     private fun checkPermission(){
-        Permissions.check(this, Manifest.permission.ACCESS_COARSE_LOCATION, null, object : PermissionHandler() {
+        Permissions.check(this, permissions, null, null, object : PermissionHandler() {
             override fun onGranted() {
-                snackbar("Location permission has been granted.")
+                snackbar(R.string.location_service_granted)
             }
 
             override fun onDenied(context: Context?, deniedPermissions: ArrayList<String>?) {
-                snackbar("Location permission has been denied.")
+                snackbar(R.string.location_service_not_granted)
             }
         })
 
     }
 
+    private fun checkServices(): Boolean{
+        val lm = getSystemService(LOCATION_SERVICE) as LocationManager
+        var gpsEnabled = false
+        var networkEnabled = false
+
+        try {
+            gpsEnabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        } catch (e: Exception) {}
+
+        try {
+            networkEnabled = lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        } catch (e: Exception){}
+
+        if (!gpsEnabled && !networkEnabled) {
+
+            val snackbar = Snackbar.make(root_layout, R.string.location_not_enabled, Snackbar.LENGTH_LONG)
+            snackbar.setAction("Settings") {
+                val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                this.startActivity(intent)
+            }
+            snackbar.show()
+            return false
+        }
+        return true
+
+    }
+
+
+    @SuppressLint("MissingPermission")
     private fun addItem(){
         val date = Calendar.getInstance().time.toString()
         list.add(WeatherInfo("24,5", date))
         adapter.notifyDataSetChanged()
-        getJsonData()
+
+        val mLocationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        val location = mLocationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+        mLocationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1,
+                1.0f, locationListener)
+
+        //TODO: Location must not be null, location disabled
+        lat = location.latitude
+        lon = location.longitude
+
+        Toast.makeText(this, "$lat / $lon", Toast.LENGTH_SHORT).show()
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
@@ -129,7 +192,10 @@ class MainActivity : AppCompatActivity() {
         when(item.itemId){
             R.id.item_save -> {
                 //TODO: Add necessary function
-                addItem()
+                if (checkServices()){
+                    //addItem()
+                    getJsonData()
+                }
                 return true
             }
             R.id.item_alert -> {
@@ -142,7 +208,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     //simple snackbar function
-    private fun Activity.snackbar(message: CharSequence) =
+    private fun Activity.snackbar(message: Int) =
             Snackbar.make(root_layout, message, Toast.LENGTH_SHORT).show()
 
 
