@@ -3,8 +3,10 @@
 
     <!--menu_main-->
     <string name="menuTitle_save">Save weather data</string>
+    <string name="menuTitle_settings">Manage application settings</string>
 
     <!--single_layout_main-->
     <string name="text_temperature">Temperature: %1$s</string>
     <string name="text_data">Date: %1$s</string>
+
 </resources>
