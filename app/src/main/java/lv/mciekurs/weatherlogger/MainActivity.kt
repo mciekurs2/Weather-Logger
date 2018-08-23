@@ -3,37 +3,53 @@ package lv.mciekurs.weatherlogger
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.content.Context
 import android.content.Intent
+import android.content.IntentSender
+import android.content.pm.PackageManager
 import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
-import android.support.v7.app.AppCompatActivity
+import android.net.Uri
 import android.os.Bundle
+import android.os.Looper
 import android.provider.Settings
 import android.support.design.widget.Snackbar
+import android.support.v4.app.ActivityCompat
+import android.support.v7.app.AppCompatActivity
 import android.support.v7.widget.LinearLayoutManager
+import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
 import android.widget.Toast
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.ResolvableApiException
+import com.google.android.gms.location.*
 import com.google.gson.GsonBuilder
-import kotlinx.android.synthetic.main.activity_main.*
-import java.util.*
 import com.nabinbhandari.android.permissions.PermissionHandler
-import com.nabinbhandari.android.permissions.Permissions;
+import com.nabinbhandari.android.permissions.Permissions
+import kotlinx.android.synthetic.main.activity_main.*
 import okhttp3.*
 import java.io.IOException
+import java.util.*
 
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var list: MutableList<WeatherInfo>
     private lateinit var adapter: RecyclerViewAdapter
-    private var lat = 0.0
-    private var lon = 0.0
-    private val permissions = arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.INTERNET)
 
+    private val TAG = MainActivity::class.java.simpleName
+
+    private lateinit var mFusedLocationClient: FusedLocationProviderClient
+    private lateinit var  mSettingsClient: SettingsClient
+    private lateinit var mLocationRequest: LocationRequest
+    private lateinit var mLocationCallback: LocationCallback
+    private lateinit var mLocationSettingsRequest: LocationSettingsRequest
+    private lateinit var mCurrentLocation: Location
+    private var mRequestingLocationUpdates: Boolean = false
+
+    private val UPDATE_INTERVAL_IN_MILLISECONDS: Long = 10000
+    private val FASTEST_UPDATE_INTERVAL_IN_MILLISECONDS: Long = UPDATE_INTERVAL_IN_MILLISECONDS / 2
+    private val REQUEST_PERMISSIONS_REQUEST_CODE = 23
+    private val REQUEST_CHECK_SETTINGS = 0x1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,34 +63,22 @@ class MainActivity : AppCompatActivity() {
         recyclerView_main.layoutManager = layoutManager
         recyclerView_main.adapter = adapter
 
-    }
+        //initialize core essentials
+        mFusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        mSettingsClient = LocationServices.getSettingsClient(this)
 
+        mCurrentLocation = Location("dummyprovider")
 
-    private val locationListener = object : LocationListener {
-        override fun onStatusChanged(p0: String?, p1: Int, p2: Bundle?) {}
-
-        override fun onProviderEnabled(p0: String?) {}
-
-        override fun onProviderDisabled(p0: String?) {}
-
-        override fun onLocationChanged(location: Location) {
-            //TODO: Get lan and lon
-            lat = location.latitude
-            lon = location.longitude
-        }
+        createLocationCallback()
+        createLocationRequest()
+        buildLocationSettingsRequest()
 
     }
 
-    @SuppressLint("MissingPermission")
     private fun getJsonData(){
-        val mLocationManager = getSystemService(LOCATION_SERVICE) as LocationManager
-        val location = mLocationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-        mLocationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1,
-                1.0f, locationListener)
 
-        //TODO: Location must not be null, location disabled
-        lat = location.latitude
-        lon = location.longitude
+        val lat = mCurrentLocation.latitude
+        val lon = mCurrentLocation.longitude
 
         val url = this.getString(R.string.weather_url, lat, lon)
         //Toast.makeText(this, url, Toast.LENGTH_SHORT).show()
@@ -83,8 +87,8 @@ class MainActivity : AppCompatActivity() {
         val client =  OkHttpClient()
 
         client.newCall(request).enqueue(object : Callback {
-            override fun onResponse(call: Call, response: Response) {
-                val body = response.body().toString()
+            override fun onResponse(call: Call?, response: Response?) {
+                val body = response?.body()?.string()
                 val gson = GsonBuilder().create()
                 val weatherData = gson.fromJson(body, CurrentWeatherData::class.java)
                 runOnUiThread {
@@ -98,8 +102,7 @@ class MainActivity : AppCompatActivity() {
             override fun onFailure(call: Call, e: IOException) {
                 //TODO: Need to handle event son failure
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, "Coordinates: $lat / $lon", Toast.LENGTH_SHORT).show()
-                    print("Coordinates: $lat / $lon")
+                    Toast.makeText(this@MainActivity, e.message.toString(), Toast.LENGTH_SHORT).show()
                 }
             }
 
@@ -108,78 +111,196 @@ class MainActivity : AppCompatActivity() {
 
     }
 
+
+    /** Callback for recieving location events */
+    private fun createLocationCallback(){
+        mLocationCallback = object : LocationCallback(){
+            override fun onLocationResult(locationResult: LocationResult) {
+                super.onLocationResult(locationResult)
+
+                mCurrentLocation = locationResult.lastLocation
+                updateLocationUI()
+            }
+        }
+    }
+
+    /** Setup location request settings */
+    private fun createLocationRequest() {
+        mLocationRequest = LocationRequest()
+
+        //interval is somewhat inexact(other application can request faster)
+        mLocationRequest.interval = UPDATE_INTERVAL_IN_MILLISECONDS
+        //interval is exact (application will never receive updates faster than this value)
+        mLocationRequest.fastestInterval = FASTEST_UPDATE_INTERVAL_IN_MILLISECONDS
+        //creates accuracy priority
+        mLocationRequest.priority = LocationRequest.PRIORITY_HIGH_ACCURACY
+    }
+
+    /** Check if device has the needed location settings */
+    private fun buildLocationSettingsRequest() {
+        val builder = LocationSettingsRequest.Builder()
+        builder.addLocationRequest(mLocationRequest)
+        //stores the types of location services the client is interested in using
+        mLocationSettingsRequest = builder.build()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        when (requestCode) {
+            // Check for the integer request code originally supplied to startResolutionForResult().
+            REQUEST_CHECK_SETTINGS -> when (resultCode) {
+                Activity.RESULT_OK -> {
+                    Log.i(TAG, "User agreed to make required location settings changes.")
+                    //nothing to do, startLocationupdates() gets called in onResume again
+                }
+                Activity.RESULT_CANCELED -> {
+                    Log.i(TAG, "User chose not to make required location settings changes.")
+                    mRequestingLocationUpdates = false
+                    updateUI()
+                }
+            }
+        }
+    }
+
+    /** Requests location updates from the FusedLocationApi */
     @SuppressLint("MissingPermission")
+    private fun startLocationUpdates(){
+        mSettingsClient.checkLocationSettings(mLocationSettingsRequest)
+                .addOnSuccessListener {
+                    Log.i(TAG, "All location settings are satisfied.")
+
+                    //requests location updates with a callback on the specified Looper thread
+                    mFusedLocationClient.requestLocationUpdates(mLocationRequest,
+                            mLocationCallback, Looper.myLooper())
+                    updateUI()
+                }.addOnFailureListener{
+                    val statusCode = (it as ApiException).statusCode
+                    when (statusCode){
+                        LocationSettingsStatusCodes.RESOLUTION_REQUIRED -> {
+                            Log.i(TAG, "Location settings not satisfied")
+                            try {
+                                val rae = it as ResolvableApiException
+                                rae.startResolutionForResult(this, REQUEST_CHECK_SETTINGS)
+                            } catch (sie: IntentSender.SendIntentException) {
+                                Log.i(TAG, "PendingIntent unable to execute request.")
+                            }
+                        } LocationSettingsStatusCodes.SETTINGS_CHANGE_UNAVAILABLE -> {
+                        val errorMsg = "Location settings are inadequate, fix in settings"
+                        Log.e(TAG, errorMsg)
+                        Toast.makeText(this, errorMsg, Toast.LENGTH_SHORT).show()
+                        mRequestingLocationUpdates = false
+                    }
+                    }
+                    updateUI()
+                }
+    }
+
+    private fun stopLocationUpdates(){
+        if (!mRequestingLocationUpdates){
+            Log.d(TAG, "Location updates stopped")
+        }
+        //removing location request for battery saving
+        mFusedLocationClient.removeLocationUpdates(mLocationCallback)
+                .addOnSuccessListener {
+                    mRequestingLocationUpdates = false
+                    //TODO: Change button state
+                }
+
+
+    }
+
+    private fun updateUI(){
+        //TODO: Change button states
+        updateLocationUI()
+    }
+
+    private fun updateLocationUI(){
+        //if(mCurrentLocation != null){
+        //TODO: Update location values
+        //textView_lat.text = mCurrentLocation.latitude.toString()
+        //textView_lon.text = mCurrentLocation.longitude.toString()
+        //}
+    }
+
     override fun onStart() {
         super.onStart()
-        Permissions.check(this, permissions, null, null, object : PermissionHandler() {
-            override fun onGranted() {
-                checkServices()
-            }
 
-            override fun onDenied(context: Context?, deniedPermissions: ArrayList<String>?) {
-                //TODO: Disable button if editText is empty
-                checkServices()
-            }
-        })
-    }
-
-    private fun checkPermission(){
-        Permissions.check(this, permissions, null, null, object : PermissionHandler() {
-            override fun onGranted() {
-                snackbar(R.string.location_service_granted)
-            }
-
-            override fun onDenied(context: Context?, deniedPermissions: ArrayList<String>?) {
-                snackbar(R.string.location_service_not_granted)
-            }
-        })
-
-    }
-
-    private fun checkServices(): Boolean{
-        val lm = getSystemService(LOCATION_SERVICE) as LocationManager
-        var gpsEnabled = false
-        var networkEnabled = false
-
-        try {
-            gpsEnabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
-        } catch (e: Exception) {}
-
-        try {
-            networkEnabled = lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-        } catch (e: Exception){}
-
-        if (!gpsEnabled && !networkEnabled) {
-
-            val snackbar = Snackbar.make(root_layout, R.string.location_not_enabled, Snackbar.LENGTH_LONG)
-            snackbar.setAction("Settings") {
-                val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-                this.startActivity(intent)
-            }
-            snackbar.show()
-            return false
+        if (mRequestingLocationUpdates && checkPermissions()){
+            startLocationUpdates()
         }
-        return true
+
+        //TODO: Handle permissions? (kinda works with everything disabled, idk why tho)
+    }
+
+    override fun onPause() {
+        super.onPause()
+
+        //remove location updates to save battery
+        stopLocationUpdates()
+    }
+
+    override fun onResume() {
+        super.onResume()
+
+        if (mRequestingLocationUpdates && checkPermissions()){
+            startLocationUpdates()
+        } else if (!checkPermissions()){
+            requestPermissions()
+        }
 
     }
 
+    private fun checkPermissions(): Boolean {
+        val permissionState = ActivityCompat.checkSelfPermission(this,
+                Manifest.permission.ACCESS_FINE_LOCATION)
+        return permissionState == PackageManager.PERMISSION_GRANTED
+    }
 
-    @SuppressLint("MissingPermission")
-    private fun addItem(){
-        val date = Calendar.getInstance().time.toString()
-        list.add(WeatherInfo("24,5", date))
-        adapter.notifyDataSetChanged()
+    private fun requestPermissions(){
+        val shouldProvideRationale = ActivityCompat.
+                shouldShowRequestPermissionRationale(this,
+                        Manifest.permission.ACCESS_FINE_LOCATION)
 
-        val mLocationManager = getSystemService(LOCATION_SERVICE) as LocationManager
-        val location = mLocationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-        mLocationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1,
-                1.0f, locationListener)
+        //provide additional rationale for user
+        if (shouldProvideRationale){
+            Log.i(TAG, "Display permission rational")
+            Snackbar.make(root_layout, R.string.permission_rationale, Snackbar.LENGTH_SHORT)
+                    .setAction(android.R.string.ok) {
+                        ActivityCompat.requestPermissions(this,
+                                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                                REQUEST_PERMISSIONS_REQUEST_CODE)
+                    }
+        } else {
+            Log.i(TAG, "Requesting permission")
+            //possible that user have checked "never ask again"
+            ActivityCompat.requestPermissions(this,
+                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                    REQUEST_PERMISSIONS_REQUEST_CODE)
+        }
+    }
 
-        //TODO: Location must not be null, location disabled
-        lat = location.latitude
-        lon = location.longitude
-
-        Toast.makeText(this, "$lat / $lon", Toast.LENGTH_SHORT).show()
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        Log.i(TAG, "Callback received from permission request")
+        if (requestCode == REQUEST_PERMISSIONS_REQUEST_CODE){
+            if (grantResults.isEmpty()){
+                Log.i(TAG, "User interaction was canceled")
+            } else if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                if (mRequestingLocationUpdates){
+                    Log.i(TAG, "Permission granted, starting location updates")
+                    startLocationUpdates()
+                }
+            } else {
+                //notify the user via a SnackBar that they have rejected a core permission
+                Snackbar.make(root_layout, R.string.permission_denied_explanation, Snackbar.LENGTH_SHORT)
+                        .setAction(R.string.settings) {
+                            val intent = Intent()
+                            intent.action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                            val uri = Uri.fromParts("package", BuildConfig.APPLICATION_ID, null)
+                            intent.data = uri
+                            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            startActivity(intent)
+                        }
+            }
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
@@ -189,27 +310,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        when(item.itemId){
+        when (item.itemId) {
             R.id.item_save -> {
                 //TODO: Add necessary function
-                if (checkServices()){
-                    //addItem()
-                    getJsonData()
-                }
+                getJsonData()
                 return true
             }
             R.id.item_alert -> {
                 //TODO: Add settings function
-                checkPermission()
+                Permissions.check(this, Manifest.permission.ACCESS_FINE_LOCATION, null, object : PermissionHandler() {
+                    override fun onGranted() {
+                        Toast.makeText(this@MainActivity, "Permission granted", Toast.LENGTH_SHORT).show()
+                    }
+                })
                 return true
             }
         }
         return super.onOptionsItemSelected(item)
     }
-
-    //simple snackbar function
-    private fun Activity.snackbar(message: Int) =
-            Snackbar.make(root_layout, message, Toast.LENGTH_SHORT).show()
-
 
 }

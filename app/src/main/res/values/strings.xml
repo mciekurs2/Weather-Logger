@@ -2,7 +2,7 @@
     <string name="app_name">Weather Logger</string>
 
     <!--main_activity-->
-    <string name="weather_url">http://api.openweathermap.org/data/2.5/weather?lat=%1$s&amp;lon=%2$s&amp;units=metric&amp;appid=65b9e5e5bf3289000b4d663073142565</string>
+    <string name="weather_url">http://api.openweathermap.org/data/2.5/weather?lat=%1$f&amp;lon=%2$f&amp;units=metric&amp;appid=65b9e5e5bf3289000b4d663073142565</string>
 
     <!--menu_main-->
     <string name="menuTitle_save">Save weather data</string>
@@ -13,8 +13,8 @@
     <string name="text_data">Date: %1$s</string>
 
     <!--snackbar-->
-    <string name="location_not_enabled">Location has not been enabled on your device. Click on setting button to change it!</string>
-    <string name="location_service_not_granted">Location permission has been denied.</string>
-    <string name="location_service_granted">Location permission has been granted.</string>
+    <string name="permission_rationale">Location permission is needed for core functionality</string>
+    <string name="permission_denied_explanation">Permission was denied, but is needed for core functionality.</string>
+    <string name="settings">Settings</string>
 
 </resources>
