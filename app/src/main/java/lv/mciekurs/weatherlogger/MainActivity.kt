@@ -18,6 +18,7 @@ import android.support.v7.widget.LinearLayoutManager
 import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
+import android.widget.EditText
 import android.widget.Toast
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.ResolvableApiException
@@ -27,7 +28,9 @@ import com.nabinbhandari.android.permissions.PermissionHandler
 import com.nabinbhandari.android.permissions.Permissions
 import kotlinx.android.synthetic.main.activity_main.*
 import okhttp3.*
+import org.jetbrains.anko.toast
 import java.io.IOException
+import java.net.InetAddress
 import java.util.*
 
 
@@ -51,9 +54,15 @@ class MainActivity : AppCompatActivity() {
     private val REQUEST_PERMISSIONS_REQUEST_CODE = 23
     private val REQUEST_CHECK_SETTINGS = 0x1
 
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        setSupportActionBar(toolbar_main)
+        supportActionBar?.setDisplayShowTitleEnabled(false)
+
+
 
         list = mutableListOf()
         adapter = RecyclerViewAdapter(list)
@@ -73,15 +82,21 @@ class MainActivity : AppCompatActivity() {
         createLocationRequest()
         buildLocationSettingsRequest()
 
+
     }
 
+    @SuppressLint("StringFormatMatches")
     private fun getJsonData(){
+        var url =  ""
 
-        val lat = mCurrentLocation.latitude
-        val lon = mCurrentLocation.longitude
+        if (checkIfEmpty()){
+            val lat = mCurrentLocation.latitude
+            val lon = mCurrentLocation.longitude
 
-        val url = this.getString(R.string.weather_url, lat, lon)
-        //Toast.makeText(this, url, Toast.LENGTH_SHORT).show()
+            url = this.getString(R.string.weather_url_location, lat, lon)
+        } else {
+            url = this.getString(R.string.weather_url_city, "London")
+        }
 
         val request = Request.Builder().url(url).build()
         val client =  OkHttpClient()
@@ -100,9 +115,14 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onFailure(call: Call, e: IOException) {
-                //TODO: Need to handle event son failure
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, e.message.toString(), Toast.LENGTH_SHORT).show()
+                    if (!isInternetAvailable()){
+                        //toast("Please enable internet connection!")
+                        toast(e.message.toString())
+                    } else {
+                        toast(e.message.toString())
+                    }
+
                 }
             }
 
@@ -110,7 +130,6 @@ class MainActivity : AppCompatActivity() {
 
 
     }
-
 
     /** Callback for recieving location events */
     private fun createLocationCallback(){
@@ -249,6 +268,18 @@ class MainActivity : AppCompatActivity() {
 
     }
 
+    fun isInternetAvailable(): Boolean {
+        return try {
+            val ipAddr = InetAddress.getByName("google.com")
+            //You can replace it with your name
+            !ipAddr.equals("")
+
+        } catch (e: Exception) {
+            false
+        }
+
+    }
+
     private fun checkPermissions(): Boolean {
         val permissionState = ActivityCompat.checkSelfPermission(this,
                 Manifest.permission.ACCESS_FINE_LOCATION)
@@ -303,13 +334,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
-        val inflate = menuInflater
-        inflate.inflate(R.menu.menu_main, menu)
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_main, menu)
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+    override fun onOptionsItemSelected(item: MenuItem) : Boolean {
         when (item.itemId) {
             R.id.item_save -> {
                 //TODO: Add necessary function
@@ -328,5 +358,14 @@ class MainActivity : AppCompatActivity() {
         }
         return super.onOptionsItemSelected(item)
     }
+
+    private fun checkIfEmpty(): Boolean{
+        val editText = toolbar_main.findViewById(R.id.editText_search) as EditText
+        if (editText.text.trim().isEmpty()){
+            return true
+        }
+        return false
+    }
+
 
 }

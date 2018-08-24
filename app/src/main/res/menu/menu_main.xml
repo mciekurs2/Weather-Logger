@@ -12,6 +12,6 @@
         android:id="@+id/item_alert"
         android:title="@string/menuTitle_settings"
         android:icon="@drawable/ic_alert_24dp"
-        app:showAsAction="always"/>
+        app:showAsAction="never"/>
 
 </menu>
